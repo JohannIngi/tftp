@@ -8,6 +8,7 @@
 
 int main(int argc, char **argv)
 {
+    printf("S T U F F");
     if(argc != 3){
         perror("Invalid arguments!\n");
         exit(EXIT_FAILURE);
