@@ -15,6 +15,11 @@
 
 #define PACKET_SIZE 516
 
+struct data_pack{
+    unsigned short opcode;
+    unsigned short blocknumber;
+    char data[512];
+};
 
 int main(int argc, char **argv)
 {
@@ -23,17 +28,18 @@ int main(int argc, char **argv)
         perror("Invalid arguments!\n");
         exit(EXIT_FAILURE);
     }
-
-    fprintf(stdout, "Legal arguments\n"); fflush(stdout);
-
     char* port = argv[1];
+
+    fprintf(stdout, "Setting up server nr. %s\n", port); fflush(stdout);
+
 
     int block;
     int sockfd;
     struct sockaddr_in server, client;
-    char client_pack[PACKET_SIZE];
+    //char client_pack[PACKET_SIZE];
     char server_pack[PACKET_SIZE];
     char error[512];
+    char ack[4];
 
 
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -87,7 +93,64 @@ int main(int argc, char **argv)
                 sendto(sockfd, error, 19, 0, (struct  sockaddr *) &client, len);
             }
 
-            char testfile[513];
+            while(1){
+                //creating a data pack
+                struct data_pack d_packet;
+                d_packet.opcode = htons(3);
+                d_packet.blocknumber = htons(block);
+                size_t number_of_bytes = fread(d_packet.data, 1, 512, file);
+                sendto(sockfd, (char*)&d_packet, number_of_bytes + 4, 0, (struct  sockaddr *) &client, len);
+                fprintf(stdout, "things have been sent \n"); fflush(stdout);
+                ssize_t ack_received = recvfrom(sockfd, ack, sizeof(ack) - 1,
+                             0, (struct sockaddr *) &client, &len);
+                fprintf(stdout, "ack received\n"); fflush(stdout);
+                /*if(ack[1] != 4){
+                    exit(1);
+                    //gera mad error
+                }
+                else if(ack[4] != block){
+                    exit(1);
+                    //gera mad error
+                }*/
+                while (number_of_bytes == 512){
+                    block++;
+                    d_packet.opcode = htons(3);
+                    d_packet.blocknumber = htons(block);
+                    number_of_bytes = fread(d_packet.data, 1, 512, file);
+                    sendto(sockfd, (char*)&d_packet, number_of_bytes + 4, 0, (struct  sockaddr *) &client, len);
+                    fprintf(stdout, "inside inner loop\n"); fflush(stdout);
+                    ack_received = recvfrom(sockfd, ack, sizeof(ack) - 1,
+                                 0, (struct sockaddr *) &client, &len);
+                    /*if(ack[1] != 4){
+                        exit(1);
+                        //gera mad error
+                    }
+                    else if(ack[4] != block){
+                        exit(1);
+                        //gera mad error
+                    }*/
+                }
+                block++;
+                d_packet.opcode = htons(3);
+                d_packet.blocknumber = htons(block);
+                number_of_bytes = fread(d_packet.data, 1, 512, file);
+                sendto(sockfd, (char*)&d_packet, number_of_bytes + 4, 0, (struct  sockaddr *) &client, len);
+                fprintf(stdout, "sending last pack\n"); fflush(stdout);
+                ack_received = recvfrom(sockfd, ack, sizeof(ack) - 1,
+                             0, (struct sockaddr *) &client, &len);
+                if(ack[1] != 4){
+                    exit(1);
+                    //gera mad error
+                }
+                else if(ack[4] != block){
+                    exit(1);
+                    //gera mad error
+                }
+                break;
+            }
+            fclose(file);
+
+            /*char testfile[513];
             while(1){
 
                 int nnn = fread(testfile, 1, 512, file);
@@ -96,7 +159,8 @@ int main(int argc, char **argv)
                 fprintf(stdout, "------------------------------------------\n"); fflush(stdout);
                 if (nnn < 512) break;
             }
-            fflush(stdout);
+            fflush(stdout);*/
+
 
 
             /*      ° store info about sender
@@ -114,6 +178,5 @@ int main(int argc, char **argv)
             sendto(sockfd, error, (size_t) n, 0, (struct  sockaddr *) &client, len);
         }
         
-
     }
 }
