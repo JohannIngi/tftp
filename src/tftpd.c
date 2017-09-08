@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+
 // Define OP Codes.
 #define RRQ 1
 #define WRQ 2
@@ -15,6 +16,11 @@
 
 #define PACKET_SIZE 516
 
+typedef int bool;
+#define true 1
+#define false 0
+
+
 //the variables needed for sending a data pack
 struct data_pack{
     unsigned short opcode;
@@ -22,23 +28,19 @@ struct data_pack{
     char data[512];
 };
 //setting the opcode number of the data pack and initializing the bloknumber
-void set_data_pack_struct(struct data_pack *data_p, unsigned short blocknr){
+void set_data_pack_struct(struct data_pack* data_p, unsigned short blocknr){
     data_p->opcode = htons(3);
     data_p->blocknumber = htons(blocknr);
 }
-/*
-void get_filename(){
-    //setja í aðferð fyrir að finna nafnið
+void get_filename(char* file_name, char* folder_name, char* full_path){
     //finding the file name from the clients request and storing it in an array for further use
-    char* file_name = server_pack + 2;
+
     size_t file_name_len = strlen(file_name);
-    size_t argv_len = strlen(argv[2]);
-    char full_path[argv_len + file_name_len + 2];
-    strcpy(full_path, argv[2]);
-    strcpy(full_path + argv_len, "/");
-    strcpy(full_path + argv_len + 1, file_name);
-    full_path[argv_len + file_name_len + 1] = 0;
-    fprintf(stdout, "Full path is: %s\n", full_path); fflush(stdout);
+    size_t folder_len = strlen(folder_name);
+    strcpy(full_path, folder_name);
+    strcpy(full_path + folder_len, "/");
+    strcpy(full_path + folder_len + 1, file_name);
+    full_path[folder_len + file_name_len + 1] = 0;
 }/*
 void reading_and_sending_packs(){
 
@@ -55,7 +57,7 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
     char* port = argv[1];
-
+    char* file_name;
     fprintf(stdout, "Setting up server nr. %s\n", port); fflush(stdout);
 
     unsigned short blocknr;
@@ -65,6 +67,7 @@ int main(int argc, char **argv)
     char server_pack[PACKET_SIZE];
     char error[512];
     char ack_buffer[4];
+    char full_path[100];
 
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     memset(&server, 0, sizeof(server));
@@ -87,21 +90,16 @@ int main(int argc, char **argv)
             blocknr = 1;
             //setja í aðferð fyrir að finna nafnið
             //finding the file name from the clients request and storing it in an array for further use
-            char* file_name = server_pack + 2;
-            size_t file_name_len = strlen(file_name);
-            size_t argv_len = strlen(argv[2]);
-            char full_path[argv_len + file_name_len + 2];
-            strcpy(full_path, argv[2]);
-            strcpy(full_path + argv_len, "/");
-            strcpy(full_path + argv_len + 1, file_name);
-            full_path[argv_len + file_name_len + 1] = 0;
+            file_name = server_pack + 2;
+            get_filename(file_name, argv[2], full_path);
             fprintf(stdout, "Full path is: %s\n", full_path); fflush(stdout);
 
-//setja í aðferð til að opna og senda file
+            //setja í aðferð til að opna og senda file
             FILE *file;
             file = fopen(full_path, "r");
+            struct data_pack d_packet;
 
-//setja error í aðferð, samt 7 mismunadni aðferðir...
+            //setja error í aðferð, samt 7 mismunandi aðferðir...
             if(file == NULL){
                 error[0] = 0;
                 error[1] = 5;
@@ -111,15 +109,20 @@ int main(int argc, char **argv)
                 sendto(sockfd, error, 19, 0, (struct  sockaddr *) &client, len);
             }
             //transfer loop starts
-            while(1){
+            
+            bool data_transfer_running = 1;
+            while(data_transfer_running){
                 //creating a data pack
-                struct data_pack d_packet;
+                
                 set_data_pack_struct(&d_packet, blocknr);
-				size_t number_of_bytes = fread(d_packet.data, 1, 512, file);
-				sendto(sockfd, (char*)&d_packet, number_of_bytes + 4, 0, (struct  sockaddr *) &client, len);
-				fprintf(stdout, "inside inner loop\n"); fflush(stdout);
-				ssize_t ack_received = recvfrom(sockfd, ack_buffer, sizeof(ack_buffer) - 1,
-				0, (struct sockaddr *) &client, &len);
+                size_t number_of_bytes = fread(d_packet.data, 1, 512, file);
+                sendto(sockfd, (char*)&d_packet, number_of_bytes + 4, 0, (struct  sockaddr *) &client, len);
+                ssize_t ack_received = recvfrom(sockfd, ack_buffer, sizeof(ack_buffer) - 1,
+                             0, (struct sockaddr *) &client, &len);
+                
+                if(number_of_bytes < 512){
+                    data_transfer_running = 0;
+                }   
 
                 /*if(ack_buffer[1] != 4){
                     exit(1);
@@ -129,40 +132,9 @@ int main(int argc, char **argv)
                     exit(1);
                     //gera mad error
                 }*/
-                while (number_of_bytes == 512){
-                    blocknr++;
-	                set_data_pack_struct(&d_packet, blocknr);
-	                number_of_bytes = fread(d_packet.data, 1, 512, file);
-	                sendto(sockfd, (char*)&d_packet, number_of_bytes + 4, 0, (struct  sockaddr *) &client, len);
-	                fprintf(stdout, "inside inner loop\n"); fflush(stdout);
-	                ack_received = recvfrom(sockfd, ack_buffer, sizeof(ack_buffer) - 1,
-	                             0, (struct sockaddr *) &client, &len);
-                    /*if(ack_buffer[1] != 4){
-                        exit(1);
-                        //gera mad error
-                    }
-                    else if(ack_buffer[4] != block){
-                        exit(1);
-                        //gera mad error
-                    }*/
-                }
                 blocknr++;
-                set_data_pack_struct(&d_packet, blocknr);
-                number_of_bytes = fread(d_packet.data, 1, 512, file);
-                sendto(sockfd, (char*)&d_packet, number_of_bytes + 4, 0, (struct  sockaddr *) &client, len);
-                fprintf(stdout, "inside inner loop\n"); fflush(stdout);
-                ack_received = recvfrom(sockfd, ack_buffer, sizeof(ack_buffer) - 1,
-                             0, (struct sockaddr *) &client, &len);
-                /*if(ack_buffer[1] != 4){
-                    exit(1);
-                    //gera mad error
-                }
-                else if(ack_buffer[4] != block){
-                    exit(1);
-                    //gera mad error
-                }*/
-                break;
             }
+            fprintf(stdout, "closing file\n"); fflush(stdout);
             fclose(file);
 
             /*      ° store info about sender
