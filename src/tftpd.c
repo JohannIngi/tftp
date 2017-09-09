@@ -42,11 +42,13 @@ void set_data_pack_struct(struct data_pack* data_p, unsigned short blocknr){
     data_p->opcode = htons(3);
     data_p->blocknumber = htons(blocknr);
 }
+//finding the file name from the clients request and storing it in an array for further use
 void get_filename(char* file_name, char* folder_name, char* full_path){
-    //finding the file name from the clients request and storing it in an array for further use
-
+    //finding the length of the file
     size_t file_name_len = strlen(file_name);
+    //finding the length of the folder
     size_t folder_len = strlen(folder_name);
+    //putting folder and file name together with the appropriate "/" between
     strcpy(full_path, folder_name);
     strcpy(full_path + folder_len, "/");
     strcpy(full_path + folder_len + 1, file_name);
@@ -55,12 +57,19 @@ void get_filename(char* file_name, char* folder_name, char* full_path){
 void reading_and_sending_packs(){
 
 }*/
+//sending the error package
 void sending_error_pack(int sockfd, struct sockaddr_in* client, unsigned int error_code){
-	char error_buffer[50];
+	//creating the array that will hold the error message
+    char error_buffer[50];
+    //initializing array to null
     memset(error_buffer, 0, 50);
+    //setting error opcode to 5
     error_buffer[1] = ERROR;
+    //setting error code
     error_buffer[3] = error_code;
+    //length of the error array
     size_t error_len = 0;
+    //setting appropriate error code
     switch(error_code)
     {
         case error_code_file_not_found:
@@ -87,8 +96,9 @@ void sending_error_pack(int sockfd, struct sockaddr_in* client, unsigned int err
         default:
             strcpy(error_buffer, "Unknown error!");
     }
-
+    //setting length of error array
     error_len = strlen(error_buffer + 4) + 4;
+    //sending error
     sendto(sockfd, error_buffer, 19, 0, (struct  sockaddr *)client, error_len);
 }
 
@@ -101,14 +111,14 @@ int main(int argc, char **argv)
     }
     char* port = argv[1];
     char* file_name;
-    fprintf(stdout, "Setting up server nr. %s\n", port); fflush(stdout);
+    fprintf(stdout, "Connecting to server number: %s\n", port); fflush(stdout);
 
     unsigned short blocknr;
     int sockfd;
     struct sockaddr_in server, client;
     //char client_pack[PACKET_SIZE];
     char server_pack[PACKET_SIZE];
-    char error[512];
+    //char error[512];
     char ack_buffer[4];
     char full_path[100];
 
@@ -120,39 +130,36 @@ int main(int argc, char **argv)
     server.sin_port = htons(atoi(port));
     bind(sockfd, (struct sockaddr *) &server, (socklen_t) sizeof(server));
 
-    fprintf(stdout, "Socket set up and bound\n"); fflush(stdout);
+    fprintf(stdout, "Socket set up complete \n"); fflush(stdout);
 
     // server loop
     for (;;) {
         socklen_t len = (socklen_t) sizeof(client);
         ssize_t n = recvfrom(sockfd, server_pack, sizeof(server_pack) - 1,
                              0, (struct sockaddr *) &client, &len);
-        server_pack[n] = '\0';
+        server_pack[n] = '\0'; //null terminating
 
-        fprintf(stdout, "received something from.... (TODO:setja inn client info maybe)\n"); fflush(stdout);
+        fprintf(stdout, "received something from client \n"); fflush(stdout);
 
         if(server_pack[1] == RRQ){ //the msg is a RRQ
+            //block number set
             blocknr = 1;
-            //setja í aðferð fyrir að finna nafnið
             //finding the file name from the clients request and storing it in an array for further use
             file_name = server_pack + 2;
             get_filename(file_name, argv[2], full_path);
             fprintf(stdout, "Full path is: %s\n", full_path); fflush(stdout);
 
-            //setja í aðferð til að opna og senda file
             FILE *file;
             file = fopen(full_path, "r");
             struct data_pack d_packet;
 
-            //setja error í aðferð, samt 7 mismunandi aðferðir...
             if(file == NULL){
                 sending_error_pack(sockfd, &client, 4);
             }
-            //transfer loop starts
-            
+            // while true transfer will run
             bool data_transfer_running = true;
 
-            //transfer loop
+            //transfer loop starts
             while(data_transfer_running){
                 //creating a data pack
                 //setting the opcode and blocknumber
@@ -160,7 +167,7 @@ int main(int argc, char **argv)
                 //reading a total of 512 bytes into a package to send
                 size_t number_of_bytes = fread(d_packet.data, 1, 512, file);
 
-
+                // while true transfer will continue
                 bool ack_is_from_receiver = true;
                 while(ack_is_from_receiver){
                     
@@ -174,7 +181,7 @@ int main(int argc, char **argv)
                         exit(1);
                     }
                     //if ack has not the same block number
-                    if(ack_buffer[4] != blocknr){
+                    if(ack_buffer[3] != blocknr){
                         ack_is_from_receiver = false;
                     }
                 }
@@ -189,16 +196,14 @@ int main(int argc, char **argv)
                     sending_error_pack(sockfd, &client, 5);
 
                 }
-                //if ack has not the same block number
                 blocknr++;
             }
             fprintf(stdout, "closing file\n"); fflush(stdout);
             fclose(file);
 
-            /*      ° store info about sender
-                    ° start >>> transfer loop <<<*/
+            /*      ° store info about sender*/
         }
-        else{ //the msg is not a RRQ
+        else{ //the message is not a RRQ
 
             fprintf(stdout, "Some retard tried something stupid\n"); fflush(stdout);
             sending_error_pack(sockfd, &client, 4); 
