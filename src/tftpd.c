@@ -16,6 +16,16 @@
 
 #define PACKET_SIZE 516
 
+#define error_code_file_not_found 1
+#define error_code_access_violation 2
+#define error_code_disk_full_or_allocation_exceeded 3
+#define error_code_illegat_tftp_operation 4
+#define error_code_unknown_transfer_ID 5
+#define error_code_file_already_exists 6
+#define error_code_no_such_user 7
+
+
+
 typedef int bool;
 #define true 1
 #define false 0
@@ -44,11 +54,44 @@ void get_filename(char* file_name, char* folder_name, char* full_path){
 }/*
 void reading_and_sending_packs(){
 
+}*/
+void sending_error_pack(int sockfd, struct sockaddr_in* client, unsigned int error_code){
+	char error_buffer[50];
+    memset(error_buffer, 0, 50);
+    error_buffer[1] = ERROR;
+    error_buffer[3] = error_code;
+    size_t error_len = 0;
+    switch(error_code)
+    {
+        case error_code_file_not_found:
+            strcpy(error_buffer, "File not found");
+            break;
+        case error_code_access_violation:
+            strcpy(error_buffer, "Access violation.");
+            break;
+        case error_code_disk_full_or_allocation_exceeded:
+            strcpy(error_buffer, "Disk full or allocation exceeded.");
+            break;
+        case error_code_illegat_tftp_operation:
+            strcpy(error_buffer, "Illegal TFTP operation.");
+            break;
+        case error_code_unknown_transfer_ID:
+            strcpy(error_buffer, "Unknown transfer ID.");
+            break;
+        case error_code_file_already_exists:
+            strcpy(error_buffer, "File already exists.");
+            break;
+        case error_code_no_such_user:
+            strcpy(error_buffer, "No such user.");
+            break;
+        default:
+            strcpy(error_buffer, "Unknown error!");
+    }
+
+    error_len = strlen(error_buffer + 4) + 4;
+    sendto(sockfd, error_buffer, 19, 0, (struct  sockaddr *)client, error_len);
 }
-void sending_error(){
-	
-}
-*/
+
 int main(int argc, char **argv)
 {
     // If we receive less than 3 arguments, terminate.
@@ -79,10 +122,12 @@ int main(int argc, char **argv)
 
     fprintf(stdout, "Socket set up and bound\n"); fflush(stdout);
 
+    // server loop
     for (;;) {
         socklen_t len = (socklen_t) sizeof(client);
         ssize_t n = recvfrom(sockfd, server_pack, sizeof(server_pack) - 1,
                              0, (struct sockaddr *) &client, &len);
+        server_pack[n] = '\0';
 
         fprintf(stdout, "received something from.... (TODO:setja inn client info maybe)\n"); fflush(stdout);
 
@@ -101,37 +146,50 @@ int main(int argc, char **argv)
 
             //setja error í aðferð, samt 7 mismunandi aðferðir...
             if(file == NULL){
-                error[0] = 0;
-                error[1] = 5;
-                error[2] = 0;
-                error[3] = 1;
-                sprintf(error + 4, "File not found!");
-                sendto(sockfd, error, 19, 0, (struct  sockaddr *) &client, len);
+                sending_error_pack(sockfd, &client, 4);
             }
             //transfer loop starts
             
-            bool data_transfer_running = 1;
+            bool data_transfer_running = true;
+
+            //transfer loop
             while(data_transfer_running){
                 //creating a data pack
-                
+                //setting the opcode and blocknumber
                 set_data_pack_struct(&d_packet, blocknr);
+                //reading a total of 512 bytes into a package to send
                 size_t number_of_bytes = fread(d_packet.data, 1, 512, file);
-                sendto(sockfd, (char*)&d_packet, number_of_bytes + 4, 0, (struct  sockaddr *) &client, len);
-                ssize_t ack_received = recvfrom(sockfd, ack_buffer, sizeof(ack_buffer) - 1,
-                             0, (struct sockaddr *) &client, &len);
-                
-                if(number_of_bytes < 512){
-                    data_transfer_running = 0;
-                }   
 
-                /*if(ack_buffer[1] != 4){
-                    exit(1);
-                    //gera mad error
+
+                bool ack_is_from_receiver = true;
+                while(ack_is_from_receiver){
+                    
+                    //sendiingng the data package
+                    sendto(sockfd, (char*)&d_packet, number_of_bytes + 4, 0, (struct  sockaddr *) &client, len);
+                    //receiving ack from client
+                    if (recvfrom(sockfd, ack_buffer, sizeof(ack_buffer),
+                                 0, (struct sockaddr *) &client, &len) < 0) {
+                        // error
+                        sending_error_pack(sockfd, &client, 4);
+                        exit(1);
+                    }
+                    //if ack has not the same block number
+                    if(ack_buffer[4] != blocknr){
+                        ack_is_from_receiver = false;
+                    }
                 }
-                else if(ack_buffer[4] != block){
-                    exit(1);
-                    //gera mad error
-                }*/
+
+                //if number of bytes is not 512 then 
+                if(number_of_bytes < 512){
+                    data_transfer_running = false;
+                } 
+
+                //if ack is not really an ack
+                if(ack_buffer[1] != 4){
+                    sending_error_pack(sockfd, &client, 5);
+
+                }
+                //if ack has not the same block number
                 blocknr++;
             }
             fprintf(stdout, "closing file\n"); fflush(stdout);
@@ -143,13 +201,7 @@ int main(int argc, char **argv)
         else{ //the msg is not a RRQ
 
             fprintf(stdout, "Some retard tried something stupid\n"); fflush(stdout);
-
-            error[0] = 0;
-            error[1] = 5;
-            error[2] = 0;
-            error[3] = 0;
-            sprintf(error + 4, "COCK ERROR");
-            sendto(sockfd, error, (size_t) n, 0, (struct  sockaddr *) &client, len);
+            sending_error_pack(sockfd, &client, 4); 
         }
         
     }
