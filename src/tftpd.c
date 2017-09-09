@@ -74,32 +74,40 @@ void sending_error_pack(int sockfd, struct sockaddr_in* client, unsigned int err
     {
         case error_code_file_not_found:
             strcpy(error_buffer, "File not found");
+            //error_len = 18;
             break;
         case error_code_access_violation:
             strcpy(error_buffer, "Access violation.");
+            //error_len = 21; 
             break;
         case error_code_disk_full_or_allocation_exceeded:
             strcpy(error_buffer, "Disk full or allocation exceeded.");
+            //error_len = 37;
             break;
         case error_code_illegat_tftp_operation:
             strcpy(error_buffer, "Illegal TFTP operation.");
+            //error_len = 27;
             break;
         case error_code_unknown_transfer_ID:
             strcpy(error_buffer, "Unknown transfer ID.");
+            //error_len = 24;
             break;
         case error_code_file_already_exists:
             strcpy(error_buffer, "File already exists.");
+            //error_len = 24;
             break;
         case error_code_no_such_user:
             strcpy(error_buffer, "No such user.");
+            //error_len = 17;
             break;
         default:
             strcpy(error_buffer, "Unknown error!");
+            //error_len = 18;
     }
     //setting length of error array
     error_len = strlen(error_buffer + 4) + 4;
     //sending error
-    sendto(sockfd, error_buffer, 19, 0, (struct  sockaddr *)client, error_len);
+    sendto(sockfd, error_buffer, error_len, 0, (struct  sockaddr *)client, error_len);
 }
 
 int main(int argc, char **argv)
@@ -139,13 +147,24 @@ int main(int argc, char **argv)
                              0, (struct sockaddr *) &client, &len);
         server_pack[n] = '\0';//null terminating
 
-        fprintf(stdout, "received something from.... (TODO:setja inn client info maybe)\n"); fflush(stdout);
+        fprintf(stdout, "received a request from.... (TODO:setja inn client info maybe)\n"); fflush(stdout);
 
         if(server_pack[1] == RRQ){ //the msg is a RRQ
+            fprintf(stdout, "The request is a read request (RRQ)\n"); fflush(stdout);
             //block number set
             blocknr = 1;
             //finding the file name from the clients request and storing it in an array for further use
             file_name = server_pack + 2;
+
+
+            //checking to see if the file name contains an .. wich is an access violation error
+            char * illegal_checker = strstr (file_name, "..");
+            if(illegal_checker != NULL){
+                sending_error_pack(sockfd, &client, 2);
+                exit(1);
+            }
+
+
             get_filename(file_name, argv[2], full_path);
             fprintf(stdout, "Full path is: %s\n", full_path); fflush(stdout);
 
@@ -182,7 +201,7 @@ int main(int argc, char **argv)
                         exit(1);
                     }
                     //if ack has not the same block number
-                    if(ack_buffer[4] != blocknr){
+                    if(ack_buffer[4] != blocknr){ //gets a warning that "array subscript is above array bounds". If i change array to [3] the transfer loop stops working...
                         ack_is_from_receiver = false;
                     }
                 }
