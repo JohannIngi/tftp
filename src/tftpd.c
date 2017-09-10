@@ -5,6 +5,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <arpa/inet.h>
 
 
 // Define OP Codes.
@@ -67,25 +68,25 @@ void sending_error_pack(int sockfd, struct sockaddr_in* client, unsigned int err
     //setting appropriate error code
     switch(error_code)
     {
-        case 1:
+        case error_code_file_not_found:
             strcpy(error_buffer + 4, "File not found. Please try again.");
             break;
-        case 2:
-            strcpy(error_buffer + 4, "Access violation. Terminating server!");
+        case error_code_access_violation:
+            strcpy(error_buffer + 4, "Access violation!");
             break;
-        case 3:
+        case error_code_disk_full_or_allocation_exceeded:
             strcpy(error_buffer + 4, "Disk full or allocation exceeded.");
             break;
-        case 4:
+        case error_code_illegat_tftp_operation:
             strcpy(error_buffer + 4, "Illegal TFTP operation. Only RRQ allowed!");
             break;
-        case 5:
+        case error_code_unknown_transfer_ID:
             strcpy(error_buffer + 4, "Unknown transfer ID.");
             break;
-        case 6:
+        case error_code_file_already_exists:
             strcpy(error_buffer + 4, "File already exists.");
             break;
-        case 7:
+        case error_code_no_such_user:
             strcpy(error_buffer + 4, "No such user.");
             break;
         default:
@@ -106,16 +107,14 @@ int main(int argc, char **argv)
     }
     char* port = argv[1];
     char* file_name;
-    fprintf(stdout, "Connecting to server number: %s\n", port); fflush(stdout);
-
+    char* ip_address;
     unsigned short blocknr;
     int sockfd;
     struct sockaddr_in server, client;
-    //char client_pack[PACKET_SIZE];
     char server_pack[PACKET_SIZE];
     char ack_buffer[5];
     char full_path[100];
-
+    fprintf(stdout, "Listening to server number: %s\n", port); fflush(stdout);
     //creating and binding a UDP socket
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     memset(&server, 0, sizeof(server));
@@ -124,7 +123,6 @@ int main(int argc, char **argv)
     server.sin_addr.s_addr = htonl(INADDR_ANY);
     server.sin_port = htons(atoi(port));
     bind(sockfd, (struct sockaddr *) &server, (socklen_t) sizeof(server));
-
     fprintf(stdout, "Socket set up complete. Waiting for request.\n"); fflush(stdout);
 
     // server loop
@@ -133,8 +131,12 @@ int main(int argc, char **argv)
         ssize_t n = recvfrom(sockfd, server_pack, sizeof(server_pack) - 1,
                              0, (struct sockaddr *) &client, &len);
         server_pack[n] = '\0';//null terminating
+        //acquiring the ip address from the client
+        ip_address = inet_ntoa(client.sin_addr);
+        //storing information about the port from client
+        unsigned short original_port = client.sin_port; 
 
-        fprintf(stdout, "Received a request from.... (TODO:setja inn client info maybe)\n"); fflush(stdout);
+        //fprintf(stdout, "Received a request from the ip address: %s\n", ip_address); fflush(stdout);
 
         if(server_pack[1] == RRQ){ //the msg is a RRQ
             fprintf(stdout, "The request is a read request (RRQ)\n"); fflush(stdout);
@@ -143,30 +145,25 @@ int main(int argc, char **argv)
             //finding the file name from the clients request and storing it in an array for further use
             file_name = server_pack + 2;
 
-
             //checking to see if the file name contains an .. wich is an access violation error
             char * illegal_checker = strstr (file_name, "..");
             if(illegal_checker != NULL){
-                fprintf(stdout, "here I send are you crazy error \n"); fflush(stdout);
+                fprintf(stdout, "here I send; are you crazy error \n"); fflush(stdout);
                 sending_error_pack(sockfd, &client, 2);
-                exit(1);
-
+                continue;
             }
-
-
+            //putting toghether file name
             get_filename(file_name, argv[2], full_path);
-            fprintf(stdout, "File requested is: %s\n", full_path); fflush(stdout);
+            fprintf(stdout, "File requested is: %s. From ip address: %s. Port number: %d\n", full_path, ip_address, original_port); fflush(stdout);
 
             FILE *file;
             file = fopen(full_path, "r");
-            
             //file not found villa
             if(file == NULL){
                 fprintf(stdout, "here I send no file found error \n"); fflush(stdout);
                 sending_error_pack(sockfd, &client, 1);
                 continue;
             }
-            
             bool data_transfer_running = true;
             struct data_pack d_packet;
             //transfer loop starts
@@ -177,11 +174,10 @@ int main(int argc, char **argv)
                 //reading a total of 512 bytes into a package to send
                 size_t number_of_bytes = fread(d_packet.data, 1, 512, file);
 
-
                 bool ack_is_from_receiver = true;
                 while(ack_is_from_receiver){
-                    
-                    //sendiingng the data package
+
+                    //sendingng the data package
                     sendto(sockfd, (char*)&d_packet, number_of_bytes + 4, 0, (struct  sockaddr *) &client, len);
                     //receiving ack from client
                     if (recvfrom(sockfd, ack_buffer, sizeof(ack_buffer),
@@ -190,22 +186,26 @@ int main(int argc, char **argv)
                         sending_error_pack(sockfd, &client, 4);
                         exit(1);
                     }
+
+                    //if no response, resend the data 5 times, if no answer still...timeout
+
+                    //if ip address does not match original sender.
+                    if(ip_address != inet_ntoa(client.sin_addr)){
+                        sending_error_pack(sockfd, &client, 5);
+                    }
                     //if ack has not the same block number
                     if(ack_buffer[4] != blocknr){
                         ack_is_from_receiver = false;
                         // senda error hér ?
                     }
                 }
-
                 //if number of bytes is not 512 then 
                 if(number_of_bytes < 512){
                     data_transfer_running = false;
                 } 
-
                 //if ack is not really an ack
                 if(ack_buffer[1] != 4){
                     sending_error_pack(sockfd, &client, 5);
-
                 }
                 blocknr++;
             }
@@ -217,7 +217,6 @@ int main(int argc, char **argv)
         }
         else{ //the msg is not a RRQ
 
-            fprintf(stdout, "Some retard tried something stupid\n"); fflush(stdout);
             sending_error_pack(sockfd, &client, 4); 
 
         }
