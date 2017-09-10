@@ -24,8 +24,6 @@
 #define error_code_file_already_exists 6
 #define error_code_no_such_user 7
 
-
-
 typedef int bool;
 #define true 1
 #define false 0
@@ -53,10 +51,7 @@ void get_filename(char* file_name, char* folder_name, char* full_path){
     strcpy(full_path + folder_len, "/");
     strcpy(full_path + folder_len + 1, file_name);
     full_path[folder_len + file_name_len + 1] = 0;
-}/*
-void reading_and_sending_packs(){
-
-}*/
+}
 //sending the error package
 void sending_error_pack(int sockfd, struct sockaddr_in* client, unsigned int error_code){
     //creating the array that will hold the error message
@@ -72,42 +67,34 @@ void sending_error_pack(int sockfd, struct sockaddr_in* client, unsigned int err
     //setting appropriate error code
     switch(error_code)
     {
-        case error_code_file_not_found:
-            strcpy(error_buffer, "File not found");
-            //error_len = 18;
+        case 1:
+            strcpy(error_buffer + 4, "File not found. Please try again.");
             break;
-        case error_code_access_violation:
-            strcpy(error_buffer, "Access violation.");
-            //error_len = 21; 
+        case 2:
+            strcpy(error_buffer + 4, "Access violation. Terminating server!");
             break;
-        case error_code_disk_full_or_allocation_exceeded:
-            strcpy(error_buffer, "Disk full or allocation exceeded.");
-            //error_len = 37;
+        case 3:
+            strcpy(error_buffer + 4, "Disk full or allocation exceeded.");
             break;
-        case error_code_illegat_tftp_operation:
-            strcpy(error_buffer, "Illegal TFTP operation.");
-            //error_len = 27;
+        case 4:
+            strcpy(error_buffer + 4, "Illegal TFTP operation. Only RRQ allowed!");
             break;
-        case error_code_unknown_transfer_ID:
-            strcpy(error_buffer, "Unknown transfer ID.");
-            //error_len = 24;
+        case 5:
+            strcpy(error_buffer + 4, "Unknown transfer ID.");
             break;
-        case error_code_file_already_exists:
-            strcpy(error_buffer, "File already exists.");
-            //error_len = 24;
+        case 6:
+            strcpy(error_buffer + 4, "File already exists.");
             break;
-        case error_code_no_such_user:
-            strcpy(error_buffer, "No such user.");
-            //error_len = 17;
+        case 7:
+            strcpy(error_buffer + 4, "No such user.");
             break;
         default:
-            strcpy(error_buffer, "Unknown error!");
-            //error_len = 18;
+            strcpy(error_buffer + 4, "Unknown error!");
     }
     //setting length of error array
     error_len = strlen(error_buffer + 4) + 4;
     //sending error
-    sendto(sockfd, error_buffer, error_len, 0, (struct  sockaddr *)client, error_len);
+    sendto(sockfd, error_buffer, error_len, 0, (struct  sockaddr *)client, (socklen_t)sizeof(struct sockaddr_in));
 }
 
 int main(int argc, char **argv)
@@ -126,19 +113,19 @@ int main(int argc, char **argv)
     struct sockaddr_in server, client;
     //char client_pack[PACKET_SIZE];
     char server_pack[PACKET_SIZE];
-    char error[512];
-    char ack_buffer[4];
+    char ack_buffer[5];
     char full_path[100];
 
+    //creating and binding a UDP socket
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     memset(&server, 0, sizeof(server));
     server.sin_family = AF_INET;
-
+    //htonl and htons convert the bytes to be used by the network functions
     server.sin_addr.s_addr = htonl(INADDR_ANY);
     server.sin_port = htons(atoi(port));
     bind(sockfd, (struct sockaddr *) &server, (socklen_t) sizeof(server));
 
-    fprintf(stdout, "Socket set up complete \n"); fflush(stdout);
+    fprintf(stdout, "Socket set up complete. Waiting for request.\n"); fflush(stdout);
 
     // server loop
     for (;;) {
@@ -147,7 +134,7 @@ int main(int argc, char **argv)
                              0, (struct sockaddr *) &client, &len);
         server_pack[n] = '\0';//null terminating
 
-        fprintf(stdout, "received a request from.... (TODO:setja inn client info maybe)\n"); fflush(stdout);
+        fprintf(stdout, "Received a request from.... (TODO:setja inn client info maybe)\n"); fflush(stdout);
 
         if(server_pack[1] == RRQ){ //the msg is a RRQ
             fprintf(stdout, "The request is a read request (RRQ)\n"); fflush(stdout);
@@ -160,25 +147,28 @@ int main(int argc, char **argv)
             //checking to see if the file name contains an .. wich is an access violation error
             char * illegal_checker = strstr (file_name, "..");
             if(illegal_checker != NULL){
+                fprintf(stdout, "here I send are you crazy error \n"); fflush(stdout);
                 sending_error_pack(sockfd, &client, 2);
                 exit(1);
+
             }
 
 
             get_filename(file_name, argv[2], full_path);
-            fprintf(stdout, "Full path is: %s\n", full_path); fflush(stdout);
+            fprintf(stdout, "File requested is: %s\n", full_path); fflush(stdout);
 
             FILE *file;
             file = fopen(full_path, "r");
-            struct data_pack d_packet;
-
+            
+            //file not found villa
             if(file == NULL){
-                sending_error_pack(sockfd, &client, 4);
+                fprintf(stdout, "here I send no file found error \n"); fflush(stdout);
+                sending_error_pack(sockfd, &client, 1);
+                continue;
             }
-            //transfer loop starts
             
             bool data_transfer_running = true;
-
+            struct data_pack d_packet;
             //transfer loop starts
             while(data_transfer_running){
                 //creating a data pack
@@ -201,8 +191,9 @@ int main(int argc, char **argv)
                         exit(1);
                     }
                     //if ack has not the same block number
-                    if(ack_buffer[4] != blocknr){ //gets a warning that "array subscript is above array bounds". If i change array to [3] the transfer loop stops working...
+                    if(ack_buffer[4] != blocknr){
                         ack_is_from_receiver = false;
+                        // senda error hér ?
                     }
                 }
 
@@ -228,6 +219,7 @@ int main(int argc, char **argv)
 
             fprintf(stdout, "Some retard tried something stupid\n"); fflush(stdout);
             sending_error_pack(sockfd, &client, 4); 
+
         }
         
     }
