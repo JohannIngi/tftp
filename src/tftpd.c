@@ -1,4 +1,5 @@
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <string.h>
@@ -20,7 +21,7 @@
 #define error_code_file_not_found 1
 #define error_code_access_violation 2
 #define error_code_disk_full_or_allocation_exceeded 3
-#define error_code_illegat_tftp_operation 4
+#define error_code_illegal_tftp_operation 4
 #define error_code_unknown_transfer_ID 5
 #define error_code_file_already_exists 6
 #define error_code_no_such_user 7
@@ -77,7 +78,7 @@ void sending_error_pack(int sockfd, struct sockaddr_in* client, unsigned int err
         case error_code_disk_full_or_allocation_exceeded:
             strcpy(error_buffer + 4, "Disk full or allocation exceeded.");
             break;
-        case error_code_illegat_tftp_operation:
+        case error_code_illegal_tftp_operation:
             strcpy(error_buffer + 4, "Illegal TFTP operation. Only RRQ allowed!");
             break;
         case error_code_unknown_transfer_ID:
@@ -110,10 +111,16 @@ int main(int argc, char **argv)
     char* ip_address;
     unsigned short blocknr;
     int sockfd;
+    //int timeout_counter = 0;
     struct sockaddr_in server, client;
     char server_pack[PACKET_SIZE];
     char ack_buffer[5];
     char full_path[100];
+
+    //setting up timeout
+    /*struct timeval timeout;
+    timeout.tv_sec = 5;*/
+
     fprintf(stdout, "Listening to server number: %s\n", port); fflush(stdout);
     //creating and binding a UDP socket
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -136,9 +143,8 @@ int main(int argc, char **argv)
         //storing information about the port from client
         unsigned short original_port = client.sin_port; 
 
-        //fprintf(stdout, "Received a request from the ip address: %s\n", ip_address); fflush(stdout);
-
-        if(server_pack[1] == RRQ){ //the msg is a RRQ
+        //the msg is a RRQ
+        if(server_pack[1] == RRQ){ 
             fprintf(stdout, "The request is a read request (RRQ)\n"); fflush(stdout);
             //block number set
             blocknr = 1;
@@ -154,6 +160,7 @@ int main(int argc, char **argv)
             }
             //putting toghether file name
             get_filename(file_name, argv[2], full_path);
+            //what is the complete filename and who requested it, ip address and port
             fprintf(stdout, "File requested is: %s. From ip address: %s. Port number: %d\n", full_path, ip_address, original_port); fflush(stdout);
 
             FILE *file;
@@ -180,17 +187,21 @@ int main(int argc, char **argv)
                     //sendingng the data package
                     sendto(sockfd, (char*)&d_packet, number_of_bytes + 4, 0, (struct  sockaddr *) &client, len);
                     //receiving ack from client
+                    //if ack is not really an ack
                     if (recvfrom(sockfd, ack_buffer, sizeof(ack_buffer),
                                  0, (struct sockaddr *) &client, &len) < 0) {
-                        // error
-                        sending_error_pack(sockfd, &client, 4);
-                        exit(1);
+                        sending_error_pack(sockfd, &client, 0);   
                     }
 
                     //if no response, resend the data 5 times, if no answer still...timeout
-
+                    /*while(setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+                        fprintf(stdout, "TIMEOUT \n"); fflush(stdout);
+                        sendto(sockfd, (char*)&d_packet, number_of_bytes + 4, 0, (struct  sockaddr *) &client, len);
+                        timeout_counter++;
+                        if(timeout_counter == 5){break;}
+                    }*/
                     //if ip address does not match original sender.
-                    if(ip_address != inet_ntoa(client.sin_addr)){
+                    if(ip_address != inet_ntoa(client.sin_addr) && original_port != client.sin_port){
                         sending_error_pack(sockfd, &client, 5);
                     }
                     //if ack has not the same block number
@@ -211,9 +222,6 @@ int main(int argc, char **argv)
             }
             fprintf(stdout, "closing file\n"); fflush(stdout);
             fclose(file);
-
-            /*      ° store info about sender
-                    ° start >>> transfer loop <<<*/
         }
         else{ //the msg is not a RRQ
 
