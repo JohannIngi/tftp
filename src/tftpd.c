@@ -111,6 +111,7 @@ int main(int argc, char **argv){
     char* ip_address;
     unsigned short blocknr;
     int sockfd;
+    int error_counter = 0;
     struct sockaddr_in server, client;
     char server_pack[PACKET_SIZE];
     char ack_buffer[4];
@@ -131,18 +132,29 @@ int main(int argc, char **argv){
     // server loop
     for (;;) {
 
+	    struct timeval timeout;
+	    timeout.tv_sec = 0;
+	    timeout.tv_usec = 0;
+	    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
         socklen_t len = (socklen_t) sizeof(client);
         //receiving a package
         ssize_t n = recvfrom(sockfd, server_pack, sizeof(server_pack) - 1,
                              0, (struct sockaddr *) &client, &len);
         //null terminating
         server_pack[n] = '\0';
+
+		timeout.tv_sec = 2;
+		timeout.tv_usec = 100;
+		setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
         //acquiring the ip address from the client
         ip_address = inet_ntoa(client.sin_addr);
         unsigned long ip_address_number = client.sin_addr.s_addr;
         //storing information about the port from client
         unsigned short original_port = client.sin_port; 
 
+        bool data_transfer_running = true;
         //the message is a RRQ
         if(server_pack[1] == RRQ){ 
             fprintf(stdout, "The request is a read request (RRQ)\n"); fflush(stdout);
@@ -154,7 +166,6 @@ int main(int argc, char **argv){
             //checking to see if the file name contains an .. wich is an access violation error
             char * illegal_checker = strstr (file_name, "..");
             if(illegal_checker != NULL){
-                fprintf(stdout, "here I send; are you crazy error \n"); fflush(stdout);
                 sending_error_pack(sockfd, &client, 2);
                 continue;
             }
@@ -167,13 +178,12 @@ int main(int argc, char **argv){
             file = fopen(full_path, "r");
             //file not found villa
             if(file == NULL){
-                fprintf(stdout, "here I send no file found error \n"); fflush(stdout);
                 sending_error_pack(sockfd, &client, 1);
                 continue;
             }
             struct data_pack d_packet;
             //transfer loop starts
-            while(true){
+            while(data_transfer_running){
             	fprintf(stdout, "transfer loop starts \n"); fflush(stdout);
                 //creating a data pack
                 //setting the opcode and blocknumber
@@ -193,10 +203,27 @@ int main(int argc, char **argv){
                     //get the blocknumber from ack received
 
                     if(receiver < 0){
-                        //system error if ack value is < 0 
-                        fprintf(stdout, "Terminating the program \n"); fflush(stdout);
-                        sending_error_pack(sockfd, &client, 0);
-                        exit(1);   
+
+						if(errno == EAGAIN || errno == EWOULDBLOCK){
+							//if no response, resend the data 5 times, if no answer still...send error
+							fprintf(stdout, "timeout counter going up \n"); fflush(stdout);
+							error_counter++;
+							if(error_counter == 5){
+								timeout.tv_sec = 0;
+								timeout.tv_usec = 0;
+								sending_error_pack(sockfd, &client, 0);
+								data_transfer_running = false;
+								break;
+							}
+							sendto(sockfd, (char*)&d_packet, number_of_bytes + 4, 0, (struct  sockaddr *) &client, len);
+							continue;
+						}
+                    	else{
+                        	//system error if ack value is < 0 
+                        	fprintf(stdout, "Terminating the program \n"); fflush(stdout);
+                        	sending_error_pack(sockfd, &client, 0);
+                        	exit(1);
+                        }   
                     }
                     //if ip address does not match original sender, send error and continue running the server
                     if(ip_address_number != client.sin_addr.s_addr && original_port != client.sin_port){
