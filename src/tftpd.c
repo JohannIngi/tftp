@@ -100,8 +100,7 @@ void sending_error_pack(int sockfd, struct sockaddr_in* client, unsigned int err
     sendto(sockfd, error_buffer, error_len, 0, (struct  sockaddr *)client, (socklen_t)sizeof(struct sockaddr_in));
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv){
     // If we receive less than 3 arguments, terminate.
     if(argc != 3){
         perror("Invalid arguments!\n");
@@ -112,16 +111,11 @@ int main(int argc, char **argv)
     char* ip_address;
     unsigned short blocknr;
     int sockfd;
-    int timeout_counter = 0;
     struct sockaddr_in server, client;
     char server_pack[PACKET_SIZE];
-    char ack_buffer[5];
+    char ack_buffer[4];
     char full_path[100];
 
-    //setting up timeout
-    struct timeval timeout;
-    timeout.tv_sec = 5;
-    timeout.tv_usec = 50;
 
     fprintf(stdout, "Listening to server number: %s\n", port); fflush(stdout);
     //creating and binding a UDP socket
@@ -136,16 +130,20 @@ int main(int argc, char **argv)
 
     // server loop
     for (;;) {
+
         socklen_t len = (socklen_t) sizeof(client);
+        //receiving a package
         ssize_t n = recvfrom(sockfd, server_pack, sizeof(server_pack) - 1,
                              0, (struct sockaddr *) &client, &len);
-        server_pack[n] = '\0';//null terminating
+        //null terminating
+        server_pack[n] = '\0';
         //acquiring the ip address from the client
         ip_address = inet_ntoa(client.sin_addr);
+        unsigned long ip_address_number = client.sin_addr.s_addr;
         //storing information about the port from client
         unsigned short original_port = client.sin_port; 
 
-        //the msg is a RRQ
+        //the message is a RRQ
         if(server_pack[1] == RRQ){ 
             fprintf(stdout, "The request is a read request (RRQ)\n"); fflush(stdout);
             //block number set
@@ -173,75 +171,66 @@ int main(int argc, char **argv)
                 sending_error_pack(sockfd, &client, 1);
                 continue;
             }
-            bool data_transfer_running = true;
             struct data_pack d_packet;
             //transfer loop starts
-            while(data_transfer_running){
+            while(true){
+            	fprintf(stdout, "transfer loop starts \n"); fflush(stdout);
                 //creating a data pack
                 //setting the opcode and blocknumber
                 set_data_pack_struct(&d_packet, blocknr);
                 //reading a total of 512 bytes into a package to send
                 size_t number_of_bytes = fread(d_packet.data, 1, 512, file);
 
-                bool ack_is_from_receiver = true;
-                while(ack_is_from_receiver){
+                //sendingng the data package
+                sendto(sockfd, (char*)&d_packet, number_of_bytes + 4, 0, (struct  sockaddr *) &client, len);
+                while(true){
+                    //receiving ack from client
+                    //Getting a value from ack
+                    //fprintf(stdout, "about to receive \n"); fflush(stdout);
+                    ssize_t receiver = recvfrom(sockfd, ack_buffer, sizeof(ack_buffer),
+                                 0, (struct sockaddr *) &client, &len);
+                    fprintf(stdout, "inner transfer loop starts \n"); fflush(stdout);
+                    //get the blocknumber from ack received
 
-                    //sendingng the data package
-                    sendto(sockfd, (char*)&d_packet, number_of_bytes + 4, 0, (struct  sockaddr *) &client, len);
-                    while(true){
-                        //receiving ack from client
-                        //Getting a value from ack
-                        ssize_t receiver = recvfrom(sockfd, ack_buffer, sizeof(ack_buffer),
-                                     0, (struct sockaddr *) &client, &len);
-                        //timeout error if ack value is < 0 and errno == etimedout
-                        if(receiver < 0 && errno == ETIMEDOUT){
-                            //if no response, resend the data 5 times, if no answer still...send error
-                                timeout_counter++;
-                                if(timeout_counter == 5){
-                                    timeout.tv_sec = 0;
-                                    timeout.tv_usec = 0;
-                                    sending_error_pack(sockfd, &client, 0);
-                                    break;
-                                }
-                            }
+                    if(receiver < 0){
                         //system error if ack value is < 0 
-                        if (receiver < 0) {
-                            sending_error_pack(sockfd, &client, 0);
-                            exit(1);   
-                        }
-                        //if ip address does not match original sender.
-                        if(ip_address != inet_ntoa(client.sin_addr) && original_port != client.sin_port){
-                            sending_error_pack(sockfd, &client, 5);
-                        }
-                        //if ack has not the same block number
-                        if(ack_buffer[4] != blocknr){
-                            ack_is_from_receiver = false;
-                            // senda error hér ?
-                        }
-                        //if the receiver is 0 or greater than there is no timeout error and the outer loop continues
-                        if(receiver >= 0){
-                            break;
-                        }
+                        fprintf(stdout, "Terminating the program \n"); fflush(stdout);
+                        sending_error_pack(sockfd, &client, 0);
+                        exit(1);   
                     }
+                    //if ip address does not match original sender, send error and continue running the server
+                    if(ip_address_number != client.sin_addr.s_addr && original_port != client.sin_port){
+                        sending_error_pack(sockfd, &client, 5);
+                        continue;
+                    }
+                    //if ack is not really an ack send error and continue running the server
+                    if(ack_buffer[1] != 4){
+                        sending_error_pack(sockfd, &client, 5);
+                        continue;
+                    }
+                    
+                    unsigned short recv_block = ((unsigned char)ack_buffer[2] << 8) + (unsigned char)ack_buffer[3];
+                    fprintf(stdout, "my block number: %hu. Ack blocknumber: %hu\n", blocknr, recv_block); fflush(stdout);
+                    //if ack has not the same block number
+                    if(recv_block != blocknr){
+                        //re-send and counter ++
+                        sendto(sockfd, (char*)&d_packet, number_of_bytes + 4, 0, (struct  sockaddr *) &client, len);
+                        continue;
+                    }
+
+                    break;
                 }
-                //if number of bytes is not 512 then 
-                if(number_of_bytes < 512){
-                    data_transfer_running = false;
-                } 
-                //if ack is not really an ack
-                if(ack_buffer[1] != 4){
-                    sending_error_pack(sockfd, &client, 5);
+            	//if number of bytes is not 512 then 
+            	if(number_of_bytes < 512){
+            		fprintf(stdout, "number of bytes is less than 512\n"); fflush(stdout);
+                	break;
                 }
                 blocknr++;
             }
-            fprintf(stdout, "closing file\n"); fflush(stdout);
-            fclose(file);
+			fprintf(stdout, "closing file\n"); fflush(stdout);
+			fclose(file);
         }
-        else{ //the msg is not a RRQ
-
-            sending_error_pack(sockfd, &client, 4); 
-
-        }
-        
+        else //the msg is not a RRQ
+        sending_error_pack(sockfd, &client, 4);    
     }
 }
