@@ -237,7 +237,7 @@ int main(int argc, char **argv){
                     unsigned short recv_block = ((unsigned char)ack_buffer[2] << 8) + (unsigned char)ack_buffer[3];
                     //if ack has not the same block number
                     if(recv_block != blocknr){
-                        //resend
+                        //resend the data and check again
                         sendto(sockfd, (char*)&d_packet, number_of_bytes + 4, 0, (struct  sockaddr *) &client, len);
                         continue;
                     }
